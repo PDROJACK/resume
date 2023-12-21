@@ -1,0 +1,212 @@
+---
+title: "How I built my first chrome extension - Injext"
+slug: "/how-i-built-my-first-chrome-extension-injext"
+publishedAt: "2022-03-13"
+image: "/images/post-thumb-01.jpg"
+summary: "A beginners guide to build chrome extensions"
+tags:
+    - "chrome extension"
+    - "browser extension"
+    - "github api"
+
+---
+
+Welcome to my first blog post, Without further delay lets talk about the idea "Injext" and how we turned this small idea into a chrome extension.
+
+## The Idea
+
+So when I was applying for internships and jobs as a student I found the job application part repetitive. There were similar questions in all of them like "Tell us about yourself", "Proudest project", "A cover letter" etc. So I wrote my answers and stored them in a github repository. Now with the 
+help of github's api and a browser extension I can directly insert any 
+my texts into html forms.
+
+Code: [Injext-Extension](https://github.com/PDROJACK/injext-extension/tree/main/src)
+
+Extension: [Chrome store](https://chrome.google.com/webstore/detail/injext/nbfdkbclppodpkkgbpmagnfenhhoihnd?hl=en)
+
+Demo: [video](https://youtu.be/-M6LBbsQG2g)
+
+## Step 1: Learning how extensions work
+
+> I will be talking about building a chrome extension as the documentation was good
+
+The main part of chrome extension is <b>manifest.json</b> file. In this file, you
+specify permissions you need from client, permissions you need from chrome 
+and other things like content scripts and background scripts.
+
+Lets talk about content scripts and background scripts first. 
+
+Background scripts in chrome are like entrypoint of a chrome extensions. 
+In these scripts, we can setup our extension and do stuff required 
+at the startup or one time tasks required to be done once an extension is installed by a user.
+They have access to all the chrome api's.
+
+Content scripts are scripts with restricted access to chrome api and can be setup to
+activate on specific URLs. They can be used to access a tab's DOM and modify it. But to 
+fulfill its task it might require other chrome api's as well and to do this it 
+has to communicate with background scripts. This concept is called Message Passing.
+Both content scripts and background scripts have access to message passing APIs.
+
+You can think of it as a Client-Server model.
+
+Below is the manifest.json file of injext, you can specify your content-scripts and 
+the url it will get executed on, in our case it will work on all websites.
+
+Similarly, background script is specified in service_worker field.
+
+``` json
+\\ manifest.json
+{
+  "name": "injext",
+  "version": "1.1",
+  "description": "Fill forms using git repository",
+  "manifest_version": 3,
+  "action": {
+    "default_popup": "./popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts" : [ 
+    { 
+      "matches": ["https://*/*"],
+      "js": ["content.js"] 
+    } 
+  ],
+  "icons": {
+    "128":"icon128.png",
+    "48":"icon48.png",
+    "16":"icon16.png"
+  },
+  "permissions": ["storage", "activeTab", "contextMenus"],
+  "host_permissions": ["https://api.github.com/"]
+}
+```
+
+Other useful property is action.default_popup. Here your extension popup html is specified.
+
+Now coming to permissions and host_permissions, these are crucial fields and require you to declare 
+permissions for chrome api's you are strictly using in you extension. Taking permissions for extra
+api's you are not using might lead to rejection from chrome developer store review So be careful.
+
+host_permissions are hosts your extension is making http calls to. In our case,
+we are calling github's api.
+
+## Step 2: Developing our idea 
+
+The design is to provide a context-menu ( menu when you right click in browser ) when 
+you right click in a text input with the files in the base directory of your github repo as menu items.
+When you click on any menu item, its contents will be pasted in the text input.
+
+There are three fetch calls:
+
+1. Http call that takes github repo url and links it with chrome extension
+2. Http call to make context menu from provided repository
+3. Http call to get contents when a context menu item is clicked
+
+
+First, call is to made from popup.html, where user will put a valid github repo url and 
+we will save that url in chrome storage. Next we send message to background.js to create a 
+context menu by fetching the repository items.
+
+```js
+\\ popup.js
+const API = "https://api.github.com";
+
+const clickkk = function sendRepo() {
+
+  let repo = document.getElementById("text-input").value;
+
+  if (repo.split(".").pop() === "git") {
+
+    const data = repo.split("/")
+    const user = data.at(-2)
+    const repoName = data.at(-1).split(".").at(0)
+
+    fetch(API+`/repos/${user}/${repoName}`, {
+          method: "GET",
+          mode: "cors",
+          headers: {
+            "Content-Type": "application/json"
+          }}
+        ).then(async (response) => {
+          const res = await response.json();
+          if(!res.private){
+            chrome.storage.sync.set({ repo }, ()=>{
+              inputArea.style.display = "none";
+              changeRepo.style.display = "inline";
+
+              chrome.runtime.sendMessage({action: "link"}, function(r) {
+                console.log(r);
+              });
+
+            })
+          }
+      }).catch(err => console.log(err));
+    
+    } else {
+      alert("Invalid URL please enter again");
+  }
+}
+
+inputButton.addEventListener("click", clickkk);
+```
+
+In the code, we are checking if repo is public, then we send message to background script to 
+link our repo and create a context menu.
+
+```js
+\\ background.js
+chrome.runtime.onMessage.addListener(function (req, sender, sendRes) {
+  
+  if (req.action === "link") {
+      setupContextMenu();
+  }
+
+});
+```
+
+The third call uses content.js (content script), we have added an event listener on each context menu item
+whenever user clicks on a menu item, background.js will fetch the contents tranform then into ascii
+and puts it in current text input value by sending a message to the active tabs content script.
+Thats pretty much how injext works.
+
+```js
+\\ background.js
+chrome.tabs.query({ active: true, currentWindow: true }, async function () {
+  
+  const res = await getTemplateData(
+    local_cache.username,
+    local_cache.repoName,
+    [info.parentMenuItemId, info.menuItemId]
+  );
+
+  chrome.tabs.sendMessage(selectedTab.id, { res }, function (response) {
+    console.log("success");
+  });
+
+});
+```
+
+The background script above fetches the data depending on the menu item clicked
+and sends it to the active tabs content script.
+
+The content script receives the message and sets the text input value.
+
+```js
+\\ content.js
+if (!chrome.runtime.onMessage.hasListeners()) {
+
+  chrome.runtime.onMessage.addListener(
+    (request, sender, sendResponse) => {
+      document.activeElement.value = request.res;
+      sendResponse(true);
+    },
+  );
+
+}
+```
+
+I have only used couple of apis but There are so many chrome apis that are yet 
+to be explored. You can get the full code from my github.
+
+Thank you for reading. I'll be back soon.
