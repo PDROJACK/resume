@@ -6,6 +6,8 @@ import Theme from './theme-provider'
 import SideNavigation from '@/components/ui/side-navigation'
 import Header from '@/components/ui/header'
 
+import {Analytics} from '@vercel/analytics/react'
+
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
@@ -60,6 +62,7 @@ export default function RootLayout({
             </div>
           </div>
         </Theme>
+        <Analytics />
       </body>
     </html>
   )
