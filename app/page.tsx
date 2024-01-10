@@ -1,6 +1,7 @@
 import { allPosts } from 'contentlayer/generated'
 import Hero from '@/components/hero'
 import PostItem from './post-item'
+import {Analytics} from '@vercel/analytics/react'
 
 export const metadata = {
   title: 'Home - DevSpace',
@@ -78,6 +79,7 @@ export default async function Home() {
           </div>
         </aside>
 
+        <Analytics />
       </div>
     </>
   )
